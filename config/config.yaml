@@ -1,0 +1,76 @@
+# Insider Threat Detection - Configuration
+# Based on paper: "Behavioral Based Insider Threat Detection Using Deep Learning"
+
+data:
+  raw_dir: "data/raw"
+  parquet_dir: "data/parquet"
+  processed_dir: "data/processed"
+  duckdb_path: "data/processed/insider.duckdb"
+
+# Feature encodings (per paper)
+encodings:
+  functional_unit:
+    Administration: 1
+    ResearchAndEngineering: 2
+    Manufacturing: 3
+    Finance: 4
+    SalesAndMarketing: 5
+    PurchasingAndContracts: 6
+  
+  # Activity encoding (for reference, we use counts instead)
+  activity:
+    Logon: 1
+    Logoff: 2
+    Connect: 3
+    Disconnect: 4
+    Email: 5
+    File: 6
+    Http: 7
+
+# Feature vector definition
+features:
+  # 12 features per session (deviation from paper's 9)
+  columns:
+    - logon_time      # 1-24
+    - day             # 0-6
+    - user_id         # encoded
+    - http_count      # 0+
+    - email_count     # 0+
+    - file_count      # 0+
+    - device_count    # 0+ (connect + disconnect)
+    - pc              # encoded
+    - logoff_time     # 1-24
+    - user_role       # 1-42
+    - functional_unit # 1-6
+    - department      # 1-7
+
+# Model architecture (matches paper)
+model:
+  lookback: 20          # Sequence length
+  lstm_units: [32, 16]  # Encoder: 32→16, Decoder: 16→32
+  n_features: 12        # Input dimension
+
+# Training hyperparameters (matches paper)
+training:
+  epochs: 200
+  batch_size: 64
+  learning_rate: 0.0001
+  optimizer: "adam"
+  loss: "mse"
+
+# Data splitting
+split:
+  train: 0.7
+  val: 0.1
+  test: 0.2
+
+# Processing options
+processing:
+  normalization: "minmax"  # 0-1 scaling
+  sequence_stride: 1       # Overlapping windows
+  per_user_sequences: true # Don't mix users
+  
+# Oversampling (to match paper's CM)
+oversampling:
+  insider_factor: 7   # ~7x oversample insider in test
+  normal_factor: 2    # ~2x oversample normal in test
