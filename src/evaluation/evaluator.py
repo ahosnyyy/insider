@@ -211,20 +211,41 @@ def compute_metrics_normal_positive(
 def plot_confusion_matrix(
     y_true: np.ndarray,
     y_pred: np.ndarray,
-    output_path: Path
+    output_path: Path,
+    positive_label: str = 'Insider'
 ):
-    """Plot and save confusion matrix."""
+    """
+    Plot and save confusion matrix with positive class in top-left (TP).
+    
+    Args:
+        y_true: Ground truth labels
+        y_pred: Predicted labels
+        output_path: Path to save the plot
+        positive_label: 'Insider' or 'Normal' - determines matrix orientation
+    """
     cm = confusion_matrix(y_true, y_pred)
+    
+    # Standard order: [[TN, FP], [FN, TP]] with Insider=1 as positive
+    # We want positive class in top-left (TP position)
+    if positive_label == 'Insider':
+        # Flip to put Insider first: [[TP, FN], [FP, TN]]
+        cm_display = cm[::-1, ::-1]
+        labels = ['Insider', 'Normal']
+    else:
+        # Normal is positive, keep as-is: Normal (0) is already first
+        # [[TN, FP], [FN, TP]] -> with Normal=pos: [[TP, FN], [FP, TN]]
+        cm_display = cm
+        labels = ['Normal', 'Insider']
     
     plt.figure(figsize=(8, 6))
     sns.heatmap(
-        cm, annot=True, fmt='d', cmap='Blues',
-        xticklabels=['Normal', 'Insider'],
-        yticklabels=['Normal', 'Insider']
+        cm_display, annot=True, fmt='d', cmap='Blues',
+        xticklabels=labels,
+        yticklabels=labels
     )
     plt.xlabel('Predicted')
     plt.ylabel('Actual')
-    plt.title('Confusion Matrix')
+    plt.title(f'Confusion Matrix ({positive_label} = Positive)')
     plt.tight_layout()
     plt.savefig(output_path, dpi=150)
     plt.close()
@@ -465,7 +486,7 @@ def save_evaluation_outputs(
     np.save(output_dir / "metrics.npy", metrics)
     
     # Save plots
-    plot_confusion_matrix(y_test, y_pred, output_dir / "confusion_matrix.png")
+    plot_confusion_matrix(y_test, y_pred, output_dir / "confusion_matrix.png", positive_label)
     plot_error_distribution(errors, y_test, threshold, output_dir / "error_distribution.png")
     plot_roc_curve(y_test, errors, output_dir / "roc_curve.png", positive_label)
     plot_pr_curve(y_test, errors, output_dir / "pr_curve.png", positive_label)
