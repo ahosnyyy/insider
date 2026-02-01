@@ -452,7 +452,6 @@ def save_evaluation_outputs(
     threshold: float,
     positive_label: str,
     sessions_df=None,
-    user_level_metrics: dict = None,
     scenario_metrics: dict = None
 ):
     """Save all evaluation outputs to a directory."""
@@ -469,10 +468,6 @@ def save_evaluation_outputs(
     plot_error_distribution(errors, y_test, threshold, output_dir / "error_distribution.png")
     plot_roc_curve(y_test, errors, output_dir / "roc_curve.png", positive_label)
     plot_pr_curve(y_test, errors, output_dir / "pr_curve.png", positive_label)
-    
-    # Save user-level metrics if available
-    if user_level_metrics:
-        np.save(output_dir / "user_level_metrics.npy", user_level_metrics)
     
     # Save per-scenario metrics (only for insider positive)
     if scenario_metrics:
@@ -564,24 +559,12 @@ def main(positive_class: str = 'both'):
             for scenario, sm in scenario_metrics.items():
                 print(f"    {scenario}: {sm['detected']}/{sm['total_sessions']} detected (Recall: {sm['recall']*100:.1f}%)")
         
-        # User-level metrics
-        user_metrics_insider = None
-        if sessions_df is not None:
-            print("\n  User-Level Metrics:")
-            user_metrics_insider = compute_user_level_metrics(sessions_df, errors, threshold, 'insider')
-            print(f"    Total users: {user_metrics_insider['total_users']}")
-            print(f"    Insider users: {user_metrics_insider['insider_users']}")
-            print(f"    Accuracy: {user_metrics_insider['accuracy']*100:.2f}%")
-            print(f"    Precision: {user_metrics_insider['precision']*100:.2f}%")
-            print(f"    Recall: {user_metrics_insider['recall']*100:.2f}%")
-            print(f"    F1: {user_metrics_insider['f1']*100:.2f}%")
-        
         # Save outputs
         print("\n  Saving outputs...")
         save_evaluation_outputs(
             eval_dir / "insider_positive",
             metrics_insider, y_test, y_pred, errors, threshold, 'Insider',
-            sessions_df, user_metrics_insider, scenario_metrics
+            sessions_df, scenario_metrics
         )
     
     # ===== NORMAL POSITIVE =====
@@ -602,22 +585,12 @@ def main(positive_class: str = 'both'):
         print(f"    TN: {metrics_normal['tn']:,}  FP: {metrics_normal['fp']:,}")
         print(f"    FN: {metrics_normal['fn']:,}  TP: {metrics_normal['tp']:,}")
         
-        # User-level metrics
-        user_metrics_normal = None
-        if sessions_df is not None:
-            print("\n  User-Level Metrics:")
-            user_metrics_normal = compute_user_level_metrics(sessions_df, errors, threshold, 'normal')
-            print(f"    Accuracy: {user_metrics_normal['accuracy']*100:.2f}%")
-            print(f"    Precision: {user_metrics_normal['precision']*100:.2f}%")
-            print(f"    Recall: {user_metrics_normal['recall']*100:.2f}%")
-            print(f"    F1: {user_metrics_normal['f1']*100:.2f}%")
-        
-        # Save outputs (no per-scenario for normal)
+        # Save outputs
         print("\n  Saving outputs...")
         save_evaluation_outputs(
             eval_dir / "normal_positive",
             metrics_normal, y_test, y_pred, errors, threshold, 'Normal',
-            sessions_df, user_metrics_normal, None
+            sessions_df, None
         )
     
     # Comparison with paper (using insider positive)
