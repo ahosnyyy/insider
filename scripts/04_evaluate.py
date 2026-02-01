@@ -7,7 +7,7 @@ Usage:
     python 04_evaluate.py                              # Default: both perspectives
     python 04_evaluate.py --positive-class insider     # Insider as positive class only
     python 04_evaluate.py --exclude-scenarios 3        # Exclude scenario 3
-    python 04_evaluate.py --exclude-scenarios 2,3      # Exclude multiple scenarios
+    python 04_evaluate.py --threshold 1.0              # Use fixed threshold
 """
 
 import argparse
@@ -38,6 +38,12 @@ def parse_args():
         default=None,
         help="Comma-separated list of scenarios to exclude (e.g., '3' or '2,3')"
     )
+    parser.add_argument(
+        "--threshold",
+        type=float,
+        default=None,
+        help="Fixed threshold value (default: auto-find optimal F1 threshold)"
+    )
     return parser.parse_args()
 
 
@@ -55,10 +61,15 @@ def main():
     print(f"  Positive class: {args.positive_class}")
     if exclude_scenarios:
         print(f"  Excluding scenarios: {exclude_scenarios}")
+    if args.threshold:
+        print(f"  Fixed threshold: {args.threshold}")
+    else:
+        print(f"  Threshold: auto (F1-optimal)")
     
     run_evaluation(
         positive_class=args.positive_class,
-        exclude_scenarios=exclude_scenarios
+        exclude_scenarios=exclude_scenarios,
+        fixed_threshold=args.threshold
     )
     
     print("\n" + "=" * 70)

@@ -477,13 +477,14 @@ def save_evaluation_outputs(
     print(f"  Outputs saved to: {output_dir}")
 
 
-def main(positive_class: str = 'both', exclude_scenarios: list = None):
+def main(positive_class: str = 'both', exclude_scenarios: list = None, fixed_threshold: float = None):
     """
     Main evaluation entry point.
     
     Args:
         positive_class: 'insider', 'normal', or 'both'
         exclude_scenarios: List of scenario numbers to exclude (e.g., [3] or [2, 3])
+        fixed_threshold: If set, use this threshold instead of finding optimal
     """
     from typing import List
     
@@ -495,6 +496,8 @@ def main(positive_class: str = 'both', exclude_scenarios: list = None):
     print(f"  Positive class: {positive_class}")
     if exclude_scenarios:
         print(f"  Excluding scenarios: {exclude_scenarios}")
+    if fixed_threshold is not None:
+        print(f"  Using fixed threshold: {fixed_threshold}")
     
     # Set device
     device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
@@ -542,11 +545,15 @@ def main(positive_class: str = 'both', exclude_scenarios: list = None):
         print(f"  Remaining samples: {len(X_test):,}")
         print(f"  Remaining insider samples: {y_test.sum():,}")
     
-    # Find optimal threshold
-    print("\nFinding optimal threshold...")
-    threshold, threshold_metrics = find_optimal_threshold(errors, y_test)
-    print(f"  Optimal threshold: {threshold:.6f}")
-    print(f"  F1 at threshold: {threshold_metrics['f1']:.4f}")
+    # Determine threshold
+    if fixed_threshold is not None:
+        threshold = fixed_threshold
+        print(f"\nUsing fixed threshold: {threshold:.6f}")
+    else:
+        print("\nFinding optimal threshold...")
+        threshold, threshold_metrics = find_optimal_threshold(errors, y_test)
+        print(f"  Optimal threshold: {threshold:.6f}")
+        print(f"  F1 at threshold: {threshold_metrics['f1']:.4f}")
     
     # Compute final metrics
     y_pred = (errors > threshold).astype(int)
