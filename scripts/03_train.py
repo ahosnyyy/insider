@@ -4,8 +4,8 @@ Training Script
 Train the LSTM-Autoencoder model.
 
 Usage:
-    python 03_train.py              # Training (uses data from previous step)
-    python 03_train.py --normalize  # Log that normalized data was used
+    python 03_train.py                    # Default (uses whatever scaler was used in feature engineering)
+    python 03_train.py --scaler standard  # Log that StandardScaler was used
 """
 
 import argparse
@@ -24,10 +24,11 @@ def parse_args():
         description="Train LSTM-Autoencoder for Insider Threat Detection"
     )
     parser.add_argument(
-        "--normalize",
-        action="store_true",
-        default=False,
-        help="Log that normalized features are being used (for tracking)"
+        "--scaler",
+        type=str,
+        choices=['none', 'minmax', 'standard'],
+        default='standard',
+        help="Log which scaler was used for features (for tracking)"
     )
     return parser.parse_args()
 
@@ -38,7 +39,7 @@ def main():
     print("=" * 70)
     print("INSIDER THREAT DETECTION - MODEL TRAINING")
     print("=" * 70)
-    print(f"  Data preprocessing: {'Normalized' if args.normalize else 'Raw values'}")
+    print(f"  Feature scaler: {args.scaler}")
     
     run_training()
     
