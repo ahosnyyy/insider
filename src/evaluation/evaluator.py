@@ -133,7 +133,7 @@ def compute_metrics(
     y_pred: np.ndarray,
     errors: np.ndarray
 ) -> Dict[str, float]:
-    """Compute all evaluation metrics."""
+    """Compute all evaluation metrics with Insider as positive class."""
     cm = confusion_matrix(y_true, y_pred)
     
     # Handle edge cases
@@ -153,6 +153,55 @@ def compute_metrics(
     
     # AUC
     fpr_curve, tpr_curve, _ = roc_curve(y_true, errors)
+    metrics['auc'] = auc(fpr_curve, tpr_curve)
+    
+    return metrics
+
+
+def compute_metrics_normal_positive(
+    y_true: np.ndarray,
+    y_pred: np.ndarray,
+    errors: np.ndarray
+) -> Dict[str, float]:
+    """
+    Compute metrics with Normal as positive class.
+    
+    This flips the interpretation:
+    - TP = Normal correctly predicted as Normal
+    - FP = Insider incorrectly predicted as Normal
+    - FN = Normal incorrectly predicted as Insider
+    - TN = Insider correctly predicted as Insider
+    """
+    cm = confusion_matrix(y_true, y_pred)
+    
+    # Original: tn, fp, fn, tp (with Insider=1 as positive)
+    tn_orig, fp_orig, fn_orig, tp_orig = cm.ravel() if cm.size == 4 else (0, 0, 0, 0)
+    
+    # Flip: Normal (0) is now positive
+    tp = tn_orig  # Normal predicted Normal
+    fp = fn_orig  # Insider predicted Normal
+    fn = fp_orig  # Normal predicted Insider
+    tn = tp_orig  # Insider predicted Insider
+    
+    precision = tp / (tp + fp) if (tp + fp) > 0 else 0
+    recall = tp / (tp + fn) if (tp + fn) > 0 else 0
+    f1 = 2 * precision * recall / (precision + recall) if (precision + recall) > 0 else 0
+    fpr = fp / (fp + tn) if (fp + tn) > 0 else 0
+    
+    metrics = {
+        'accuracy': (tp + tn) / (tp + tn + fp + fn) if (tp + tn + fp + fn) > 0 else 0,
+        'precision': precision,
+        'recall': recall,
+        'f1': f1,
+        'fpr': fpr,
+        'tn': int(tn),
+        'fp': int(fp),
+        'fn': int(fn),
+        'tp': int(tp)
+    }
+    
+    # AUC (inverted - lower error = more likely normal)
+    fpr_curve, tpr_curve, _ = roc_curve(1 - y_true, -errors)
     metrics['auc'] = auc(fpr_curve, tpr_curve)
     
     return metrics
@@ -249,13 +298,19 @@ def print_comparison_with_paper(metrics: Dict[str, float]):
     print("  FN: 14,572   TP: 529")
 
 
-def main():
-    """Main evaluation entry point."""
+def main(positive_class: str = 'both'):
+    """
+    Main evaluation entry point.
+    
+    Args:
+        positive_class: 'insider', 'normal', or 'both'
+    """
     config = load_config()
     
     print("=" * 60)
     print("MODEL EVALUATION")
     print("=" * 60)
+    print(f"  Positive class: {positive_class}")
     
     # Set device
     device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
@@ -286,17 +341,44 @@ def main():
     
     # Compute final metrics
     y_pred = (errors > threshold).astype(int)
-    metrics = compute_metrics(y_test, y_pred, errors)
     
-    print("\n" + "=" * 60)
-    print("EVALUATION RESULTS")
-    print("=" * 60)
-    print(f"  Accuracy:  {metrics['accuracy']*100:.2f}%")
-    print(f"  Precision: {metrics['precision']*100:.2f}%")
-    print(f"  Recall:    {metrics['recall']*100:.2f}%")
-    print(f"  F1 Score:  {metrics['f1']*100:.2f}%")
-    print(f"  AUC:       {metrics['auc']:.4f}")
-    print(f"  FPR:       {metrics['fpr']*100:.2f}%")
+    # Metrics with Insider as positive class
+    metrics_insider = compute_metrics(y_test, y_pred, errors)
+    
+    # Metrics with Normal as positive class
+    metrics_normal = compute_metrics_normal_positive(y_test, y_pred, errors)
+    
+    # Display results based on positive_class option
+    if positive_class in ['insider', 'both']:
+        print("\n" + "=" * 60)
+        print("METRICS (Insider = Positive Class)")
+        print("=" * 60)
+        print(f"  Accuracy:  {metrics_insider['accuracy']*100:.2f}%")
+        print(f"  Precision: {metrics_insider['precision']*100:.2f}%")
+        print(f"  Recall:    {metrics_insider['recall']*100:.2f}%")
+        print(f"  F1 Score:  {metrics_insider['f1']*100:.2f}%")
+        print(f"  AUC:       {metrics_insider['auc']:.4f}")
+        print(f"  FPR:       {metrics_insider['fpr']*100:.2f}%")
+        print(f"  Confusion Matrix:")
+        print(f"    TN: {metrics_insider['tn']:,}  FP: {metrics_insider['fp']:,}")
+        print(f"    FN: {metrics_insider['fn']:,}  TP: {metrics_insider['tp']:,}")
+    
+    if positive_class in ['normal', 'both']:
+        print("\n" + "=" * 60)
+        print("METRICS (Normal = Positive Class)")
+        print("=" * 60)
+        print(f"  Accuracy:  {metrics_normal['accuracy']*100:.2f}%")
+        print(f"  Precision: {metrics_normal['precision']*100:.2f}%")
+        print(f"  Recall:    {metrics_normal['recall']*100:.2f}%")
+        print(f"  F1 Score:  {metrics_normal['f1']*100:.2f}%")
+        print(f"  AUC:       {metrics_normal['auc']:.4f}")
+        print(f"  FPR:       {metrics_normal['fpr']*100:.2f}%")
+        print(f"  Confusion Matrix (Normal=Pos):")
+        print(f"    TN: {metrics_normal['tn']:,}  FP: {metrics_normal['fp']:,}")
+        print(f"    FN: {metrics_normal['fn']:,}  TP: {metrics_normal['tp']:,}")
+    
+    # Use insider metrics as primary for saving/plotting
+    metrics = metrics_insider
     
     # Create plots
     project_root = Path(__file__).parent.parent.parent
