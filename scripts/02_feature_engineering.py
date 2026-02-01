@@ -8,8 +8,9 @@ Run the complete feature engineering pipeline:
 4. Split data
 
 Usage:
-    python 02_feature_engineering.py              # Default: no normalization
-    python 02_feature_engineering.py --normalize  # With Min-Max normalization
+    python 02_feature_engineering.py                    # Default: StandardScaler
+    python 02_feature_engineering.py --scaler minmax    # Min-Max normalization
+    python 02_feature_engineering.py --scaler none      # No scaling (raw values)
 """
 
 import argparse
@@ -29,10 +30,11 @@ def parse_args():
         description="Feature Engineering for Insider Threat Detection"
     )
     parser.add_argument(
-        "--normalize",
-        action="store_true",
-        default=False,
-        help="Apply Min-Max normalization to features (default: False)"
+        "--scaler",
+        type=str,
+        choices=['none', 'minmax', 'standard'],
+        default='standard',
+        help="Type of feature scaling: none, minmax, or standard (default: standard)"
     )
     return parser.parse_args()
 
@@ -43,11 +45,11 @@ def main():
     print("=" * 70)
     print("INSIDER THREAT DETECTION - FEATURE ENGINEERING")
     print("=" * 70)
-    print(f"  Normalization: {'ENABLED' if args.normalize else 'DISABLED'}")
+    print(f"  Scaler: {args.scaler}")
     
     # Step 1: Feature Engineering
     print("\n[STEP 1/2] Sessionizing events and extracting features...")
-    run_feature_engineering(normalize=args.normalize)
+    run_feature_engineering(scaler_type=args.scaler)
     
     # Step 2: Sequence Creation
     print("\n[STEP 2/2] Creating LSTM sequences and splitting data...")

@@ -18,7 +18,7 @@ from typing import Tuple, Optional
 import duckdb
 import numpy as np
 import pandas as pd
-from sklearn.preprocessing import LabelEncoder, MinMaxScaler
+from sklearn.preprocessing import LabelEncoder, MinMaxScaler, StandardScaler
 import yaml
 from tqdm import tqdm
 import pickle
@@ -293,21 +293,39 @@ def create_feature_matrix(sessions_df: pd.DataFrame) -> np.ndarray:
 
 def normalize_features(
     X: np.ndarray,
-    scaler: Optional[MinMaxScaler] = None
-) -> Tuple[np.ndarray, MinMaxScaler]:
-    """Apply Min-Max normalization to features."""
-    print("\n--- Normalizing features ---")
+    scaler_type: str = 'standard',
+    scaler = None
+) -> Tuple[np.ndarray, object]:
+    """
+    Apply normalization/standardization to features.
+    
+    Args:
+        X: Feature matrix
+        scaler_type: 'minmax' or 'standard'
+        scaler: Existing scaler to use (for transform only)
+        
+    Returns:
+        Normalized features and fitted scaler
+    """
+    print(f"\n--- Scaling features ({scaler_type}) ---")
     
     if scaler is None:
-        scaler = MinMaxScaler(feature_range=(0, 1))
-        X_normalized = scaler.fit_transform(X)
+        if scaler_type == 'minmax':
+            scaler = MinMaxScaler(feature_range=(0, 1))
+        elif scaler_type == 'standard':
+            scaler = StandardScaler()
+        else:
+            raise ValueError(f"Unknown scaler type: {scaler_type}")
+        X_scaled = scaler.fit_transform(X)
     else:
-        X_normalized = scaler.transform(X)
+        X_scaled = scaler.transform(X)
     
-    print(f"  Min values: {X_normalized.min(axis=0).round(3)}")
-    print(f"  Max values: {X_normalized.max(axis=0).round(3)}")
+    print(f"  Mean values: {X_scaled.mean(axis=0).round(3)}")
+    print(f"  Std values: {X_scaled.std(axis=0).round(3)}")
+    print(f"  Min values: {X_scaled.min(axis=0).round(3)}")
+    print(f"  Max values: {X_scaled.max(axis=0).round(3)}")
     
-    return X_normalized, scaler
+    return X_scaled, scaler
 
 
 def save_processed_data(
@@ -360,19 +378,19 @@ def save_processed_data(
     print(f"  Artifacts: {artifacts_path}")
 
 
-def main(normalize: bool = False):
+def main(scaler_type: str = 'standard'):
     """
     Main entry point for feature engineering.
     
     Args:
-        normalize: If True, apply Min-Max normalization. If False, use raw values.
+        scaler_type: Type of scaling to apply: 'none', 'minmax', or 'standard'
     """
     config = load_config()
     
     print("=" * 60)
     print("FEATURE ENGINEERING")
     print("=" * 60)
-    print(f"  Normalization: {'ENABLED' if normalize else 'DISABLED'}")
+    print(f"  Scaler: {scaler_type}")
     
     # Connect to database
     conn = get_db_connection(config)
@@ -393,13 +411,13 @@ def main(normalize: bool = False):
         # Step 5: Create feature matrix
         X = create_feature_matrix(sessions_df)
         
-        # Step 6: Conditionally normalize features
-        if normalize:
-            X_final, scaler = normalize_features(X)
-        else:
-            print("\n--- Skipping normalization (raw values) ---")
+        # Step 6: Apply scaling based on scaler_type
+        if scaler_type == 'none':
+            print("\n--- Skipping scaling (raw values) ---")
             X_final = X
             scaler = None
+        else:
+            X_final, scaler = normalize_features(X, scaler_type=scaler_type)
         
         # Step 7: Save processed data
         save_processed_data(sessions_df, X_final, encoders, scaler, config)
@@ -411,7 +429,7 @@ def main(normalize: bool = False):
         print(f"  Total sessions: {len(sessions_df):,}")
         print(f"  Insider sessions: {sessions_df['is_insider'].sum():,}")
         print(f"  Feature dimensions: {X_final.shape[1]}")
-        print(f"  Normalized: {normalize}")
+        print(f"  Scaler: {scaler_type}")
         
     finally:
         conn.close()
@@ -419,3 +437,4 @@ def main(normalize: bool = False):
 
 if __name__ == "__main__":
     main()
+
