@@ -258,10 +258,14 @@ def plot_error_distribution(
 def plot_roc_curve(
     y_true: np.ndarray,
     errors: np.ndarray,
-    output_path: Path
+    output_path: Path,
+    positive_label: str = 'Insider'
 ):
     """Plot ROC curve."""
-    fpr, tpr, _ = roc_curve(y_true, errors)
+    if positive_label == 'Normal':
+        fpr, tpr, _ = roc_curve(1 - y_true, -errors)
+    else:
+        fpr, tpr, _ = roc_curve(y_true, errors)
     roc_auc = auc(fpr, tpr)
     
     plt.figure(figsize=(8, 6))
@@ -271,11 +275,140 @@ def plot_roc_curve(
     plt.ylim([0.0, 1.05])
     plt.xlabel('False Positive Rate')
     plt.ylabel('True Positive Rate')
-    plt.title('Receiver Operating Characteristic (ROC) Curve')
+    plt.title(f'ROC Curve ({positive_label} = Positive)')
     plt.legend(loc='lower right')
     plt.tight_layout()
     plt.savefig(output_path, dpi=150)
     plt.close()
+    
+    return roc_auc
+
+
+def plot_pr_curve(
+    y_true: np.ndarray,
+    errors: np.ndarray,
+    output_path: Path,
+    positive_label: str = 'Insider'
+):
+    """Plot Precision-Recall curve."""
+    if positive_label == 'Normal':
+        # For Normal as positive, lower error = positive
+        precision, recall, _ = precision_recall_curve(1 - y_true, -errors)
+    else:
+        # For Insider as positive, higher error = positive
+        precision, recall, _ = precision_recall_curve(y_true, errors)
+    
+    # Calculate AUPRC
+    auprc = auc(recall, precision)
+    
+    plt.figure(figsize=(8, 6))
+    plt.plot(recall, precision, color='darkorange', lw=2, label=f'PR curve (AUPRC = {auprc:.4f})')
+    plt.xlim([0.0, 1.0])
+    plt.ylim([0.0, 1.05])
+    plt.xlabel('Recall')
+    plt.ylabel('Precision')
+    plt.title(f'Precision-Recall Curve ({positive_label} = Positive)')
+    plt.legend(loc='upper right')
+    plt.tight_layout()
+    plt.savefig(output_path, dpi=150)
+    plt.close()
+    
+    return auprc
+
+
+def compute_per_scenario_metrics(
+    sessions_df,
+    errors: np.ndarray,
+    threshold: float
+) -> Dict[str, Dict[str, float]]:
+    """
+    Compute metrics broken down by insider scenario.
+    Only applies to insider sessions.
+    """
+    import pandas as pd
+    
+    # Get scenario labels
+    scenarios = sessions_df['scenario'].values
+    y_true = sessions_df['is_insider'].values
+    y_pred = (errors > threshold).astype(int)
+    
+    scenario_metrics = {}
+    unique_scenarios = [s for s in pd.unique(scenarios) if s is not None]
+    
+    for scenario in unique_scenarios:
+        mask = scenarios == scenario
+        if mask.sum() == 0:
+            continue
+            
+        y_true_scenario = y_true[mask]
+        y_pred_scenario = y_pred[mask]
+        
+        tp = ((y_pred_scenario == 1) & (y_true_scenario == 1)).sum()
+        fn = ((y_pred_scenario == 0) & (y_true_scenario == 1)).sum()
+        
+        scenario_metrics[str(scenario)] = {
+            'total_sessions': int(mask.sum()),
+            'detected': int(tp),
+            'missed': int(fn),
+            'recall': tp / (tp + fn) if (tp + fn) > 0 else 0
+        }
+    
+    return scenario_metrics
+
+
+def compute_user_level_metrics(
+    sessions_df,
+    errors: np.ndarray,
+    threshold: float,
+    positive_class: str = 'insider'
+) -> Dict[str, float]:
+    """
+    Aggregate session predictions to user level.
+    A user is predicted as insider if ANY of their sessions exceed threshold.
+    """
+    import pandas as pd
+    
+    # Create dataframe with predictions
+    df = sessions_df[['user_id', 'is_insider']].copy()
+    df['error'] = errors
+    df['pred_insider'] = (errors > threshold).astype(int)
+    
+    # Aggregate to user level
+    # User is insider if they have at least one insider session (ground truth)
+    # User is predicted insider if at least one session exceeds threshold
+    user_df = df.groupby('user_id').agg({
+        'is_insider': 'max',  # 1 if any session is insider
+        'pred_insider': 'max',  # 1 if any session predicted insider
+        'error': 'max'  # Max error across sessions
+    }).reset_index()
+    
+    y_true = user_df['is_insider'].values
+    y_pred = user_df['pred_insider'].values
+    
+    if positive_class == 'normal':
+        # Flip interpretation
+        y_true = 1 - y_true
+        y_pred = 1 - y_pred
+    
+    # Compute metrics
+    cm = confusion_matrix(y_true, y_pred)
+    tn, fp, fn, tp = cm.ravel() if cm.size == 4 else (0, 0, 0, 0)
+    
+    metrics = {
+        'total_users': len(user_df),
+        'insider_users': int((user_df['is_insider'] == 1).sum()),
+        'normal_users': int((user_df['is_insider'] == 0).sum()),
+        'accuracy': accuracy_score(y_true, y_pred),
+        'precision': precision_score(y_true, y_pred, zero_division=0),
+        'recall': recall_score(y_true, y_pred, zero_division=0),
+        'f1': f1_score(y_true, y_pred, zero_division=0),
+        'tn': int(tn),
+        'fp': int(fp),
+        'fn': int(fn),
+        'tp': int(tp)
+    }
+    
+    return metrics
 
 
 def print_comparison_with_paper(metrics: Dict[str, float]):
@@ -296,6 +429,57 @@ def print_comparison_with_paper(metrics: Dict[str, float]):
     print("\n{:<20}".format("Confusion Matrix (Paper):"))
     print("  TN: 180,732  FP: 4,163")
     print("  FN: 14,572   TP: 529")
+
+
+def load_sessions_df(config: dict):
+    """Load sessions dataframe for per-scenario and user-level metrics."""
+    import pandas as pd
+    project_root = Path(__file__).parent.parent.parent
+    processed_dir = project_root / config['data']['processed_dir']
+    sessions_path = processed_dir / "sessions.parquet"
+    
+    if sessions_path.exists():
+        return pd.read_parquet(sessions_path)
+    return None
+
+
+def save_evaluation_outputs(
+    output_dir: Path,
+    metrics: dict,
+    y_test: np.ndarray,
+    y_pred: np.ndarray,
+    errors: np.ndarray,
+    threshold: float,
+    positive_label: str,
+    sessions_df=None,
+    user_level_metrics: dict = None,
+    scenario_metrics: dict = None
+):
+    """Save all evaluation outputs to a directory."""
+    import json
+    
+    output_dir.mkdir(parents=True, exist_ok=True)
+    
+    # Save metrics
+    metrics['threshold'] = threshold
+    np.save(output_dir / "metrics.npy", metrics)
+    
+    # Save plots
+    plot_confusion_matrix(y_test, y_pred, output_dir / "confusion_matrix.png")
+    plot_error_distribution(errors, y_test, threshold, output_dir / "error_distribution.png")
+    plot_roc_curve(y_test, errors, output_dir / "roc_curve.png", positive_label)
+    plot_pr_curve(y_test, errors, output_dir / "pr_curve.png", positive_label)
+    
+    # Save user-level metrics if available
+    if user_level_metrics:
+        np.save(output_dir / "user_level_metrics.npy", user_level_metrics)
+    
+    # Save per-scenario metrics (only for insider positive)
+    if scenario_metrics:
+        with open(output_dir / "per_scenario.json", 'w') as f:
+            json.dump(scenario_metrics, f, indent=2)
+    
+    print(f"  Outputs saved to: {output_dir}")
 
 
 def main(positive_class: str = 'both'):
@@ -327,6 +511,14 @@ def main(positive_class: str = 'both'):
     print(f"  Insider samples: {y_test.sum():,}")
     print(f"  Normal samples: {(y_test == 0).sum():,}")
     
+    # Load sessions for scenario/user metrics
+    sessions_df = load_sessions_df(config)
+    if sessions_df is not None:
+        # Filter to test set indices (last portion of data)
+        # This is approximate - ideally we'd save test indices
+        test_size = len(X_test)
+        sessions_df = sessions_df.tail(test_size).reset_index(drop=True)
+    
     # Calculate reconstruction errors
     print("\nCalculating reconstruction errors...")
     errors = calculate_reconstruction_errors(model, X_test, device)
@@ -342,17 +534,18 @@ def main(positive_class: str = 'both'):
     # Compute final metrics
     y_pred = (errors > threshold).astype(int)
     
-    # Metrics with Insider as positive class
-    metrics_insider = compute_metrics(y_test, y_pred, errors)
+    # Setup output directories
+    project_root = Path(__file__).parent.parent.parent
+    eval_dir = project_root / "outputs" / "evaluation"
     
-    # Metrics with Normal as positive class
-    metrics_normal = compute_metrics_normal_positive(y_test, y_pred, errors)
-    
-    # Display results based on positive_class option
+    # ===== INSIDER POSITIVE =====
     if positive_class in ['insider', 'both']:
         print("\n" + "=" * 60)
         print("METRICS (Insider = Positive Class)")
         print("=" * 60)
+        
+        metrics_insider = compute_metrics(y_test, y_pred, errors)
+        
         print(f"  Accuracy:  {metrics_insider['accuracy']*100:.2f}%")
         print(f"  Precision: {metrics_insider['precision']*100:.2f}%")
         print(f"  Recall:    {metrics_insider['recall']*100:.2f}%")
@@ -362,11 +555,43 @@ def main(positive_class: str = 'both'):
         print(f"  Confusion Matrix:")
         print(f"    TN: {metrics_insider['tn']:,}  FP: {metrics_insider['fp']:,}")
         print(f"    FN: {metrics_insider['fn']:,}  TP: {metrics_insider['tp']:,}")
+        
+        # Per-scenario metrics (only for insider)
+        scenario_metrics = None
+        if sessions_df is not None and 'scenario' in sessions_df.columns:
+            print("\n  Per-Scenario Breakdown:")
+            scenario_metrics = compute_per_scenario_metrics(sessions_df, errors, threshold)
+            for scenario, sm in scenario_metrics.items():
+                print(f"    {scenario}: {sm['detected']}/{sm['total_sessions']} detected (Recall: {sm['recall']*100:.1f}%)")
+        
+        # User-level metrics
+        user_metrics_insider = None
+        if sessions_df is not None:
+            print("\n  User-Level Metrics:")
+            user_metrics_insider = compute_user_level_metrics(sessions_df, errors, threshold, 'insider')
+            print(f"    Total users: {user_metrics_insider['total_users']}")
+            print(f"    Insider users: {user_metrics_insider['insider_users']}")
+            print(f"    Accuracy: {user_metrics_insider['accuracy']*100:.2f}%")
+            print(f"    Precision: {user_metrics_insider['precision']*100:.2f}%")
+            print(f"    Recall: {user_metrics_insider['recall']*100:.2f}%")
+            print(f"    F1: {user_metrics_insider['f1']*100:.2f}%")
+        
+        # Save outputs
+        print("\n  Saving outputs...")
+        save_evaluation_outputs(
+            eval_dir / "insider_positive",
+            metrics_insider, y_test, y_pred, errors, threshold, 'Insider',
+            sessions_df, user_metrics_insider, scenario_metrics
+        )
     
+    # ===== NORMAL POSITIVE =====
     if positive_class in ['normal', 'both']:
         print("\n" + "=" * 60)
         print("METRICS (Normal = Positive Class)")
         print("=" * 60)
+        
+        metrics_normal = compute_metrics_normal_positive(y_test, y_pred, errors)
+        
         print(f"  Accuracy:  {metrics_normal['accuracy']*100:.2f}%")
         print(f"  Precision: {metrics_normal['precision']*100:.2f}%")
         print(f"  Recall:    {metrics_normal['recall']*100:.2f}%")
@@ -376,70 +601,35 @@ def main(positive_class: str = 'both'):
         print(f"  Confusion Matrix (Normal=Pos):")
         print(f"    TN: {metrics_normal['tn']:,}  FP: {metrics_normal['fp']:,}")
         print(f"    FN: {metrics_normal['fn']:,}  TP: {metrics_normal['tp']:,}")
+        
+        # User-level metrics
+        user_metrics_normal = None
+        if sessions_df is not None:
+            print("\n  User-Level Metrics:")
+            user_metrics_normal = compute_user_level_metrics(sessions_df, errors, threshold, 'normal')
+            print(f"    Accuracy: {user_metrics_normal['accuracy']*100:.2f}%")
+            print(f"    Precision: {user_metrics_normal['precision']*100:.2f}%")
+            print(f"    Recall: {user_metrics_normal['recall']*100:.2f}%")
+            print(f"    F1: {user_metrics_normal['f1']*100:.2f}%")
+        
+        # Save outputs (no per-scenario for normal)
+        print("\n  Saving outputs...")
+        save_evaluation_outputs(
+            eval_dir / "normal_positive",
+            metrics_normal, y_test, y_pred, errors, threshold, 'Normal',
+            sessions_df, user_metrics_normal, None
+        )
     
-    # Use insider metrics as primary for saving/plotting
-    metrics = metrics_insider
+    # Comparison with paper (using insider positive)
+    if positive_class in ['insider', 'both']:
+        print_comparison_with_paper(metrics_insider)
     
-    # Create plots
-    project_root = Path(__file__).parent.parent.parent
-    plots_dir = project_root / "outputs" / "plots"
-    log_dir = project_root / "outputs" / "logs"
-    plots_dir.mkdir(parents=True, exist_ok=True)
-    
-    print("\nGenerating plots...")
-    plot_confusion_matrix(y_test, y_pred, plots_dir / "confusion_matrix.png")
-    plot_error_distribution(errors, y_test, threshold, plots_dir / "error_distribution.png")
-    plot_roc_curve(y_test, errors, plots_dir / "roc_curve.png")
-    print(f"  Plots saved to: {plots_dir}")
-    
-    # Log all metrics to TensorBoard
-    print("\nLogging metrics to TensorBoard...")
-    from torch.utils.tensorboard import SummaryWriter
-    writer = SummaryWriter(log_dir / "evaluation")
-    
-    # Log scalar metrics
-    writer.add_scalar('Eval/Accuracy', metrics['accuracy'], 0)
-    writer.add_scalar('Eval/Precision', metrics['precision'], 0)
-    writer.add_scalar('Eval/Recall', metrics['recall'], 0)
-    writer.add_scalar('Eval/F1', metrics['f1'], 0)
-    writer.add_scalar('Eval/FPR', metrics['fpr'], 0)
-    writer.add_scalar('Eval/AUC', metrics['auc'], 0)
-    writer.add_scalar('Eval/Threshold', threshold, 0)
-    
-    # Log confusion matrix values
-    writer.add_scalar('ConfusionMatrix/TN', metrics['tn'], 0)
-    writer.add_scalar('ConfusionMatrix/FP', metrics['fp'], 0)
-    writer.add_scalar('ConfusionMatrix/FN', metrics['fn'], 0)
-    writer.add_scalar('ConfusionMatrix/TP', metrics['tp'], 0)
-    
-    # Log reconstruction error stats
-    writer.add_scalar('ReconError/mean_normal', errors[y_test == 0].mean(), 0)
-    writer.add_scalar('ReconError/mean_insider', errors[y_test == 1].mean(), 0)
-    writer.add_scalar('ReconError/std_normal', errors[y_test == 0].std(), 0)
-    writer.add_scalar('ReconError/std_insider', errors[y_test == 1].std(), 0)
-    
-    # Add images of plots to TensorBoard
-    from PIL import Image
-    import torchvision.transforms as transforms
-    
-    for plot_name in ['confusion_matrix.png', 'error_distribution.png', 'roc_curve.png']:
-        plot_path = plots_dir / plot_name
-        if plot_path.exists():
-            img = Image.open(plot_path)
-            img_tensor = transforms.ToTensor()(img)
-            writer.add_image(f'Plots/{plot_name.replace(".png", "")}', img_tensor, 0)
-    
-    writer.close()
-    print(f"  TensorBoard logs saved to: {log_dir}/evaluation")
-    
-    # Comparison with paper
-    print_comparison_with_paper(metrics)
-    
-    # Save metrics
-    metrics['threshold'] = threshold
-    np.save(project_root / "outputs" / "evaluation_metrics.npy", metrics)
-    print(f"\nMetrics saved to: outputs/evaluation_metrics.npy")
+    print("\n" + "=" * 60)
+    print("EVALUATION COMPLETE!")
+    print("=" * 60)
+    print(f"\nOutputs saved to: {eval_dir}")
 
 
 if __name__ == "__main__":
     main()
+
