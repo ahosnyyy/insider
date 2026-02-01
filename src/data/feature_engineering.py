@@ -314,7 +314,7 @@ def save_processed_data(
     sessions_df: pd.DataFrame,
     X: np.ndarray,
     encoders: dict,
-    scaler: MinMaxScaler,
+    scaler: Optional[MinMaxScaler],
     config: dict
 ):
     """Save processed data and artifacts."""
@@ -360,13 +360,19 @@ def save_processed_data(
     print(f"  Artifacts: {artifacts_path}")
 
 
-def main():
-    """Main entry point for feature engineering."""
+def main(normalize: bool = False):
+    """
+    Main entry point for feature engineering.
+    
+    Args:
+        normalize: If True, apply Min-Max normalization. If False, use raw values.
+    """
     config = load_config()
     
     print("=" * 60)
     print("FEATURE ENGINEERING")
     print("=" * 60)
+    print(f"  Normalization: {'ENABLED' if normalize else 'DISABLED'}")
     
     # Connect to database
     conn = get_db_connection(config)
@@ -387,11 +393,16 @@ def main():
         # Step 5: Create feature matrix
         X = create_feature_matrix(sessions_df)
         
-        # Step 6: Normalize features
-        X_normalized, scaler = normalize_features(X)
+        # Step 6: Conditionally normalize features
+        if normalize:
+            X_final, scaler = normalize_features(X)
+        else:
+            print("\n--- Skipping normalization (raw values) ---")
+            X_final = X
+            scaler = None
         
         # Step 7: Save processed data
-        save_processed_data(sessions_df, X_normalized, encoders, scaler, config)
+        save_processed_data(sessions_df, X_final, encoders, scaler, config)
         
         print("\n" + "=" * 60)
         print("FEATURE ENGINEERING COMPLETE!")
@@ -399,7 +410,8 @@ def main():
         print(f"\nSummary:")
         print(f"  Total sessions: {len(sessions_df):,}")
         print(f"  Insider sessions: {sessions_df['is_insider'].sum():,}")
-        print(f"  Feature dimensions: {X_normalized.shape[1]}")
+        print(f"  Feature dimensions: {X_final.shape[1]}")
+        print(f"  Normalized: {normalize}")
         
     finally:
         conn.close()
