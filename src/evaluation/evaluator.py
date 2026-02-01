@@ -4,11 +4,12 @@ Evaluation Module
 Evaluate trained model and compute metrics.
 
 Key operations:
-1. Load trained model
-2. Calculate reconstruction error on test set
-3. Find F1-maximizing threshold
-4. Generate confusion matrix and metrics
-5. Create visualizations
+1. Load trained model and calculate reconstruction errors
+2. Find F1-maximizing threshold (or use fixed threshold)
+3. Compute metrics with Insider or Normal as positive class
+4. Generate visualizations (confusion matrix, ROC, PR curves)
+5. Per-scenario breakdown for insider types
+6. Save all outputs to organized directories
 """
 
 import os
