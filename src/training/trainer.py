@@ -127,13 +127,18 @@ class Trainer:
         self.best_val_loss = float('inf')
         self.best_epoch = 0
     
-    def train_epoch(self, train_loader: DataLoader, epoch: int = None) -> float:
+    def train_epoch(self, train_loader: DataLoader, epoch: int = None, total_epochs: int = None) -> float:
         """Train for one epoch. Returns average loss."""
         self.model.train()
         total_loss = 0.0
         
         # Batch-level progress bar
-        desc = f"Epoch {epoch}" if epoch else "Training"
+        if epoch and total_epochs:
+            desc = f"Epoch {epoch}/{total_epochs}"
+        elif epoch:
+            desc = f"Epoch {epoch}"
+        else:
+            desc = "Training"
         pbar = tqdm(train_loader, desc=desc, leave=False, unit="batch")
         
         for batch_x, _ in pbar:
@@ -305,7 +310,7 @@ class Trainer:
         
         for epoch in range(1, self.epochs + 1):
             # Train (with batch-level progress bar)
-            train_loss = self.train_epoch(train_loader, epoch)
+            train_loss = self.train_epoch(train_loader, epoch, self.epochs)
             val_loss, recon_stats = self.validate(val_loader)
             
             history['train_loss'].append(train_loss)
