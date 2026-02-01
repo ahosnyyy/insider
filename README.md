@@ -137,9 +137,36 @@ python scripts/05_plot.py
 
 Model and training parameters are configured in `config/config.yaml`.
 
-Key parameters:
-- `model.hidden_size`: LSTM hidden dimension (default: 128)
-- `model.num_layers`: Number of LSTM layers (default: 2)
-- `training.epochs`: Training epochs (default: 200)
-- `training.batch_size`: Batch size (default: 256)
-- `training.learning_rate`: Learning rate (default: 0.001)
+### Model Architecture
+```yaml
+model:
+  lookback: 20          # Sequence length (timesteps)
+  lstm_units: [32, 16]  # Encoder: 32→16, Decoder: 16→32
+  n_features: 12        # Input feature dimension
+```
+
+### Training Hyperparameters
+```yaml
+training:
+  epochs: 200
+  batch_size: 64
+  learning_rate: 0.0001
+  optimizer: "adam"
+  loss: "mse"
+```
+
+### Data Splitting
+```yaml
+split:
+  train: 0.7
+  val: 0.1
+  test: 0.2
+```
+
+### Feature Vector (12 features per session)
+- `logon_time`, `logoff_time` (1-24)
+- `day` (0-6)
+- `user_id`, `pc` (encoded)
+- `http_count`, `email_count`, `file_count`, `device_count`
+- `user_role`, `functional_unit`, `department`
+
