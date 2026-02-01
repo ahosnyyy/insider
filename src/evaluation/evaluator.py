@@ -477,19 +477,24 @@ def save_evaluation_outputs(
     print(f"  Outputs saved to: {output_dir}")
 
 
-def main(positive_class: str = 'both'):
+def main(positive_class: str = 'both', exclude_scenarios: list = None):
     """
     Main evaluation entry point.
     
     Args:
         positive_class: 'insider', 'normal', or 'both'
+        exclude_scenarios: List of scenario numbers to exclude (e.g., [3] or [2, 3])
     """
+    from typing import List
+    
     config = load_config()
     
     print("=" * 60)
     print("MODEL EVALUATION")
     print("=" * 60)
     print(f"  Positive class: {positive_class}")
+    if exclude_scenarios:
+        print(f"  Excluding scenarios: {exclude_scenarios}")
     
     # Set device
     device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
@@ -506,11 +511,10 @@ def main(positive_class: str = 'both'):
     print(f"  Insider samples: {y_test.sum():,}")
     print(f"  Normal samples: {(y_test == 0).sum():,}")
     
-    # Load sessions for scenario/user metrics
+    # Load sessions for scenario metrics
     sessions_df = load_sessions_df(config)
     if sessions_df is not None:
         # Filter to test set indices (last portion of data)
-        # This is approximate - ideally we'd save test indices
         test_size = len(X_test)
         sessions_df = sessions_df.tail(test_size).reset_index(drop=True)
     
@@ -519,6 +523,24 @@ def main(positive_class: str = 'both'):
     errors = calculate_reconstruction_errors(model, X_test, device)
     print(f"  Mean error (normal): {errors[y_test == 0].mean():.6f}")
     print(f"  Mean error (insider): {errors[y_test == 1].mean():.6f}")
+    
+    # Apply scenario exclusion if specified
+    if exclude_scenarios and sessions_df is not None and 'scenario' in sessions_df.columns:
+        # Create mask for samples to KEEP (not in excluded scenarios)
+        exclude_mask = sessions_df['scenario'].isin([float(s) for s in exclude_scenarios])
+        keep_mask = ~exclude_mask
+        
+        excluded_count = exclude_mask.sum()
+        print(f"\n  Excluding {excluded_count:,} samples from scenarios {exclude_scenarios}")
+        
+        # Filter all arrays
+        X_test = X_test[keep_mask]
+        y_test = y_test[keep_mask]
+        errors = errors[keep_mask]
+        sessions_df = sessions_df[keep_mask].reset_index(drop=True)
+        
+        print(f"  Remaining samples: {len(X_test):,}")
+        print(f"  Remaining insider samples: {y_test.sum():,}")
     
     # Find optimal threshold
     print("\nFinding optimal threshold...")

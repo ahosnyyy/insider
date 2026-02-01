@@ -4,8 +4,10 @@ Evaluation Script
 Evaluate the trained model and generate reports.
 
 Usage:
-    python 04_evaluate.py                        # Default: Insider as positive class
-    python 04_evaluate.py --positive-class both  # Calculate both perspectives
+    python 04_evaluate.py                              # Default: both perspectives
+    python 04_evaluate.py --positive-class insider     # Insider as positive class only
+    python 04_evaluate.py --exclude-scenarios 3        # Exclude scenario 3
+    python 04_evaluate.py --exclude-scenarios 2,3      # Exclude multiple scenarios
 """
 
 import argparse
@@ -30,18 +32,34 @@ def parse_args():
         default='both',
         help="Which class to treat as positive for metrics (default: both)"
     )
+    parser.add_argument(
+        "--exclude-scenarios",
+        type=str,
+        default=None,
+        help="Comma-separated list of scenarios to exclude (e.g., '3' or '2,3')"
+    )
     return parser.parse_args()
 
 
 def main():
     args = parse_args()
     
+    # Parse excluded scenarios
+    exclude_scenarios = None
+    if args.exclude_scenarios:
+        exclude_scenarios = [int(s.strip()) for s in args.exclude_scenarios.split(',')]
+    
     print("=" * 70)
     print("INSIDER THREAT DETECTION - MODEL EVALUATION")
     print("=" * 70)
     print(f"  Positive class: {args.positive_class}")
+    if exclude_scenarios:
+        print(f"  Excluding scenarios: {exclude_scenarios}")
     
-    run_evaluation(positive_class=args.positive_class)
+    run_evaluation(
+        positive_class=args.positive_class,
+        exclude_scenarios=exclude_scenarios
+    )
     
     print("\n" + "=" * 70)
     print("EVALUATION COMPLETE!")
