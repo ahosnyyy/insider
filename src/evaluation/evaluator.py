@@ -91,38 +91,45 @@ def calculate_reconstruction_errors(
 
 def find_optimal_threshold(
     errors: np.ndarray,
-    y_true: np.ndarray
+    y_true: np.ndarray,
+    positive_class: str = 'insider'
 ) -> Tuple[float, Dict[str, float]]:
     """
-    Find threshold that maximizes F1 score.
+    Find threshold that maximizes F1 score for the specified positive class.
+    
+    Args:
+        errors: Reconstruction errors
+        y_true: Ground truth labels (1=Insider, 0=Normal)
+        positive_class: 'insider' or 'normal'
     
     Returns:
         - Optimal threshold
         - Dictionary of metrics at that threshold
     """
     # Try different thresholds
-    thresholds = np.percentile(errors, np.linspace(80, 99.9, 100))
+    thresholds = np.percentile(errors, np.linspace(1, 99, 100))
     
     best_f1 = 0
-    best_threshold = thresholds[0]
+    best_threshold = thresholds[len(thresholds)//2]
     best_metrics = {}
     
     for threshold in thresholds:
-        y_pred = (errors > threshold).astype(int)
-        
-        if y_pred.sum() == 0:  # No predictions
-            continue
-            
-        f1 = f1_score(y_true, y_pred, zero_division=0)
+        if positive_class == 'insider':
+            # High error = Insider (positive)
+            y_pred = (errors > threshold).astype(int)
+            f1 = f1_score(y_true, y_pred, zero_division=0)
+        else:
+            # Low error = Normal (positive)
+            # Flip: Normal=1, Insider=0
+            y_pred = (errors <= threshold).astype(int)  # predict Normal
+            y_true_flipped = 1 - y_true  # Normal=1, Insider=0
+            f1 = f1_score(y_true_flipped, y_pred, zero_division=0)
         
         if f1 > best_f1:
             best_f1 = f1
             best_threshold = threshold
             best_metrics = {
                 'threshold': threshold,
-                'accuracy': accuracy_score(y_true, y_pred),
-                'precision': precision_score(y_true, y_pred, zero_division=0),
-                'recall': recall_score(y_true, y_pred, zero_division=0),
                 'f1': f1
             }
     
@@ -567,19 +574,6 @@ def main(positive_class: str = 'both', exclude_scenarios: list = None, fixed_thr
         print(f"  Remaining samples: {len(X_test):,}")
         print(f"  Remaining insider samples: {y_test.sum():,}")
     
-    # Determine threshold
-    if fixed_threshold is not None:
-        threshold = fixed_threshold
-        print(f"\nUsing fixed threshold: {threshold:.6f}")
-    else:
-        print("\nFinding optimal threshold...")
-        threshold, threshold_metrics = find_optimal_threshold(errors, y_test)
-        print(f"  Optimal threshold: {threshold:.6f}")
-        print(f"  F1 at threshold: {threshold_metrics['f1']:.4f}")
-    
-    # Compute final metrics
-    y_pred = (errors > threshold).astype(int)
-    
     # Setup output directories
     project_root = Path(__file__).parent.parent.parent
     eval_dir = project_root / "outputs" / "evaluation"
@@ -590,7 +584,20 @@ def main(positive_class: str = 'both', exclude_scenarios: list = None, fixed_thr
         print("METRICS (Insider = Positive Class)")
         print("=" * 60)
         
-        metrics_insider = compute_metrics(y_test, y_pred, errors)
+        # Find threshold for insider as positive
+        if fixed_threshold is not None:
+            threshold_insider = fixed_threshold
+            print(f"  Using fixed threshold: {threshold_insider:.6f}")
+        else:
+            print("  Finding optimal threshold (maximizing Insider F1)...")
+            threshold_insider, threshold_metrics = find_optimal_threshold(errors, y_test, 'insider')
+            print(f"  Optimal threshold: {threshold_insider:.6f}")
+            print(f"  F1 at threshold: {threshold_metrics['f1']:.4f}")
+        
+        # Predictions: high error = Insider
+        y_pred_insider = (errors > threshold_insider).astype(int)
+        
+        metrics_insider = compute_metrics(y_test, y_pred_insider, errors)
         
         print(f"  Accuracy:  {metrics_insider['accuracy']*100:.2f}%")
         print(f"  Precision: {metrics_insider['precision']*100:.2f}%")
@@ -606,7 +613,7 @@ def main(positive_class: str = 'both', exclude_scenarios: list = None, fixed_thr
         scenario_metrics = None
         if sessions_df is not None and 'scenario' in sessions_df.columns:
             print("\n  Per-Scenario Breakdown:")
-            scenario_metrics = compute_per_scenario_metrics(sessions_df, errors, threshold)
+            scenario_metrics = compute_per_scenario_metrics(sessions_df, errors, threshold_insider)
             for scenario, sm in scenario_metrics.items():
                 print(f"    {scenario}: {sm['detected']}/{sm['total_sessions']} detected (Recall: {sm['recall']*100:.1f}%)")
         
@@ -614,7 +621,7 @@ def main(positive_class: str = 'both', exclude_scenarios: list = None, fixed_thr
         print("\n  Saving outputs...")
         save_evaluation_outputs(
             eval_dir / "insider_positive",
-            metrics_insider, y_test, y_pred, errors, threshold, 'Insider',
+            metrics_insider, y_test, y_pred_insider, errors, threshold_insider, 'Insider',
             sessions_df, scenario_metrics
         )
     
@@ -624,7 +631,20 @@ def main(positive_class: str = 'both', exclude_scenarios: list = None, fixed_thr
         print("METRICS (Normal = Positive Class)")
         print("=" * 60)
         
-        metrics_normal = compute_metrics_normal_positive(y_test, y_pred, errors)
+        # Find threshold for normal as positive
+        if fixed_threshold is not None:
+            threshold_normal = fixed_threshold
+            print(f"  Using fixed threshold: {threshold_normal:.6f}")
+        else:
+            print("  Finding optimal threshold (maximizing Normal F1)...")
+            threshold_normal, threshold_metrics = find_optimal_threshold(errors, y_test, 'normal')
+            print(f"  Optimal threshold: {threshold_normal:.6f}")
+            print(f"  F1 at threshold: {threshold_metrics['f1']:.4f}")
+        
+        # Predictions: low error = Normal (so y_pred for insider=1 is still error > threshold)
+        y_pred_normal = (errors > threshold_normal).astype(int)
+        
+        metrics_normal = compute_metrics_normal_positive(y_test, y_pred_normal, errors)
         
         print(f"  Accuracy:  {metrics_normal['accuracy']*100:.2f}%")
         print(f"  Precision: {metrics_normal['precision']*100:.2f}%")
@@ -640,7 +660,7 @@ def main(positive_class: str = 'both', exclude_scenarios: list = None, fixed_thr
         print("\n  Saving outputs...")
         save_evaluation_outputs(
             eval_dir / "normal_positive",
-            metrics_normal, y_test, y_pred, errors, threshold, 'Normal',
+            metrics_normal, y_test, y_pred_normal, errors, threshold_normal, 'Normal',
             sessions_df, None
         )
     
