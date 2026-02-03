@@ -4,8 +4,10 @@ Plotting Script
 Generate visualization plots for analysis.
 
 Plots:
-1. Reconstruction error scatter plot (like paper's figure)
-2. Training/Validation loss curve
+1. Training/Validation loss curve
+2. Reconstruction error scatter (Insider threshold)
+3. Reconstruction error scatter (Normal threshold)
+4. Reconstruction error scatter (Combined thresholds)
 
 Usage:
     python 05_plot.py
@@ -25,7 +27,8 @@ def plot_reconstruction_error_scatter(
     errors: np.ndarray,
     y_test: np.ndarray,
     threshold: float,
-    output_path: Path
+    output_path: Path,
+    positive_label: str = 'Insider'
 ):
     """
     Create scatter plot of reconstruction error by data point index.
@@ -54,7 +57,52 @@ def plot_reconstruction_error_scatter(
     
     plt.xlabel('Data point index')
     plt.ylabel('Reconstruction error')
-    plt.title('Reconstruction error for different classes')
+    plt.title(f'Reconstruction Error ({positive_label} = Positive)')
+    plt.legend(loc='upper left')
+    plt.tight_layout()
+    plt.savefig(output_path, dpi=150)
+    plt.close()
+    
+    print(f"  Saved: {output_path}")
+
+
+def plot_reconstruction_error_dual_threshold(
+    errors: np.ndarray,
+    y_test: np.ndarray,
+    threshold_insider: float,
+    threshold_normal: float,
+    output_path: Path
+):
+    """
+    Create scatter plot with both threshold lines.
+    """
+    plt.figure(figsize=(12, 6))
+    
+    # Get indices for each class
+    normal_idx = np.where(y_test == 0)[0]
+    insider_idx = np.where(y_test == 1)[0]
+    
+    # Plot normal samples first (blue)
+    plt.scatter(
+        normal_idx, errors[normal_idx],
+        c='blue', alpha=0.5, s=10, label='Normal'
+    )
+    
+    # Plot insider samples on top (orange)
+    plt.scatter(
+        insider_idx, errors[insider_idx],
+        c='orange', alpha=0.7, s=10, label='Insider'
+    )
+    
+    # Add both threshold lines
+    plt.axhline(y=threshold_insider, color='red', linestyle='-', linewidth=2, 
+                label=f'Insider Threshold: {threshold_insider:.4f}')
+    plt.axhline(y=threshold_normal, color='green', linestyle='--', linewidth=2, 
+                label=f'Normal Threshold: {threshold_normal:.4f}')
+    
+    plt.xlabel('Data point index')
+    plt.ylabel('Reconstruction error')
+    plt.title('Reconstruction Error (Both Thresholds)')
     plt.legend(loc='upper left')
     plt.tight_layout()
     plt.savefig(output_path, dpi=150)
@@ -123,7 +171,7 @@ def main():
     processed_dir = project_root / config['data']['processed_dir']
     
     # ===== PLOT 1: Loss Curve =====
-    print("\n[1/2] Generating loss curve...")
+    print("\n[1/4] Generating loss curve...")
     history_path = outputs_dir / "training_history.npy"
     
     if history_path.exists():
@@ -132,8 +180,8 @@ def main():
     else:
         print("  Warning: training_history.npy not found!")
     
-    # ===== PLOT 2: Reconstruction Error Scatter =====
-    print("\n[2/2] Generating reconstruction error scatter plot...")
+    # ===== PLOT 2-4: Reconstruction Error Scatter Plots =====
+    print("\n[2-4/4] Generating reconstruction error scatter plots...")
     
     # Load test data
     X_test = np.load(processed_dir / "X_test.npy")
@@ -169,23 +217,50 @@ def main():
         
         errors = np.array(errors)
         
-        # Load threshold from evaluation metrics if available
-        eval_metrics_path = outputs_dir / "evaluation" / "insider_positive" / "metrics.npy"
-        if eval_metrics_path.exists():
-            metrics = np.load(eval_metrics_path, allow_pickle=True).item()
-            threshold = metrics.get('threshold', np.percentile(errors, 90))
-        else:
-            # Use 90th percentile as default threshold
-            threshold = np.percentile(errors, 90)
+        # Load thresholds from evaluation metrics
+        eval_insider_path = outputs_dir / "evaluation" / "insider_positive" / "metrics.npy"
+        eval_normal_path = outputs_dir / "evaluation" / "normal_positive" / "metrics.npy"
         
-        print(f"  Threshold: {threshold:.4f}")
+        # Insider threshold
+        if eval_insider_path.exists():
+            metrics_insider = np.load(eval_insider_path, allow_pickle=True).item()
+            threshold_insider = metrics_insider.get('threshold', np.percentile(errors, 90))
+        else:
+            threshold_insider = np.percentile(errors, 90)
+        
+        # Normal threshold
+        if eval_normal_path.exists():
+            metrics_normal = np.load(eval_normal_path, allow_pickle=True).item()
+            threshold_normal = metrics_normal.get('threshold', np.percentile(errors, 50))
+        else:
+            threshold_normal = np.percentile(errors, 50)
+        
+        print(f"  Insider threshold: {threshold_insider:.4f}")
+        print(f"  Normal threshold: {threshold_normal:.4f}")
         print(f"  Mean error (normal): {errors[y_test == 0].mean():.4f}")
         print(f"  Mean error (insider): {errors[y_test == 1].mean():.4f}")
         
-        # Create scatter plot
+        # Plot 2: Insider positive scatter
+        print("\n  [2/4] Insider positive scatter plot...")
         plot_reconstruction_error_scatter(
-            errors, y_test, threshold,
-            plots_dir / "reconstruction_error_scatter.png"
+            errors, y_test, threshold_insider,
+            plots_dir / "reconstruction_error_scatter_insider.png",
+            positive_label='Insider'
+        )
+        
+        # Plot 3: Normal positive scatter
+        print("  [3/4] Normal positive scatter plot...")
+        plot_reconstruction_error_scatter(
+            errors, y_test, threshold_normal,
+            plots_dir / "reconstruction_error_scatter_normal.png",
+            positive_label='Normal'
+        )
+        
+        # Plot 4: Combined with both thresholds
+        print("  [4/4] Combined scatter plot with both thresholds...")
+        plot_reconstruction_error_dual_threshold(
+            errors, y_test, threshold_insider, threshold_normal,
+            plots_dir / "reconstruction_error_scatter_combined.png"
         )
     else:
         print("  Warning: No model checkpoint found!")
