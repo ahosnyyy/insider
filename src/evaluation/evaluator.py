@@ -488,9 +488,13 @@ def save_evaluation_outputs(
     
     output_dir.mkdir(parents=True, exist_ok=True)
     
-    # Save metrics
+    # Save metrics (both npy and JSON)
     metrics['threshold'] = threshold
     np.save(output_dir / "metrics.npy", metrics)
+    
+    # Save as JSON (human-readable)
+    with open(output_dir / "metrics.json", 'w') as f:
+        json.dump(metrics, f, indent=2)
     
     # Save plots
     plot_confusion_matrix(y_test, y_pred, output_dir / "confusion_matrix.png", positive_label)
